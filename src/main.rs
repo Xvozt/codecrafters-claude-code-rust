@@ -105,20 +105,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
                 _ => panic!("file path must be a string"),
             };
-
-            // for tool_call in tool_calls {
-            //     let name = tool_call["function"]["name"].as_str().unwrap_or_default();
-            //     if name.eq_ignore_ascii_case("read") {
-            //         let args = tool_call["function"]["arguments"].as_str().unwrap_or("{}");
-            //         let args_json: Value = serde_json::from_str(args).unwrap_or_else(|_| json!({}));
-
-            //         if let Some(path) = args_json["file_path"].as_str() {
-            //             let file_content = fs::read_to_string(path)?;
-
-            //             println!("{}", file_content)
-            //         }
-            //     }
-            // }
         } else if let Some(content) = response["choices"][0]["message"]["content"].as_str() {
             println!("{}", content);
             break;
@@ -127,17 +113,3 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     Ok(())
 }
-
-// "role": "assistant",
-// "content": null,
-// "tool_calls": [
-//   {
-//     "id": "call_abc123",
-//     "type": "function",
-//     "function": {
-//       "name": "Read",
-//       "arguments": "{\"file_path\": \"README.md\"}"
-//     }
-//   }
-// ]
-// }
