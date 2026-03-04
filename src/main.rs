@@ -27,62 +27,117 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_api_key(api_key);
 
     let client = Client::with_config(config);
-
-    #[allow(unused_variables)]
-    let response: Value = client
-        .chat()
-        .create_byot(json!({
-            "messages": [
-                {
-                    "role": "user",
-                    "content": args.prompt
-                }
-            ],
-            "model": "anthropic/claude-haiku-4.5",
-            "tools": [
-                {
-                  "type": "function",
-                  "function": {
-                    "name": "Read",
-                    "description": "Read and return the contents of a file",
-                    "parameters": {
-                      "type": "object",
-                      "properties": {
-                        "file_path": {
-                          "type": "string",
-                          "description": "The path to the file to read"
+    let mut messages: Vec<Value> = Vec::new();
+    messages.push(json!({
+            "role": "user",
+            "content": args.prompt
+    }));
+    loop {
+        #[allow(unused_variables)]
+        let response: Value = client
+            .chat()
+            .create_byot(json!({
+                "messages": messages,
+                "model": "anthropic/claude-haiku-4.5",
+                "tools": [
+                    {
+                      "type": "function",
+                      "function": {
+                        "name": "Read",
+                        "description": "Read and return the contents of a file",
+                        "parameters": {
+                          "type": "object",
+                          "properties": {
+                            "file_path": {
+                              "type": "string",
+                              "description": "The path to the file to read"
+                            }
+                          },
+                          "required": ["file_path"]
                         }
-                      },
-                      "required": ["file_path"]
+                      }
                     }
-                  }
+                ]
+            }))
+            .await?;
+
+        // You can use print statements as follows for debugging, they'll be visible when running tests.
+        eprintln!("Logs from your program will appear here!");
+
+        // TODO: Uncomment the lines below to pass the first stage
+        let message = &response["choices"][0]["message"];
+
+        if let Some(tools) = message["tool_calls"].as_array()
+            && !tools.is_empty()
+        {
+            messages.push(message.to_owned());
+            let tool_call = match &tools[0]["function"] {
+                Value::Object(tool) => tool,
+                _ => panic!("Invalid tool call"),
+            };
+            let tool_call_id = match &tools[0]["id"] {
+                Value::String(id) => id,
+                _ => panic!("Tool call id not provided or not a string"),
+            };
+
+            let tool_name = match &tool_call["name"] {
+                Value::String(name) => name,
+                _ => panic!("Tool name must be a string"),
+            };
+
+            let args: Value = match &tool_call["arguments"] {
+                Value::String(raw) => serde_json::from_str(raw.as_str()).unwrap(),
+                _ => panic!("Invalid arguments"),
+            };
+
+            match tool_name.as_str() {
+                "Read" => {
+                    if let Some(path) = args["file_path"].as_str() {
+                        let file_content = fs::read_to_string(path)?;
+                        messages.push(json!({
+                            "role": "tool",
+                            "tool_call_id": tool_call_id,
+                            "content": file_content,
+                        }));
+                    } else {
+                        panic!("file_path must be a string")
+                    }
                 }
-            ]
-        }))
-        .await?;
+                _ => panic!("file path must be a string"),
+            };
 
-    // You can use print statements as follows for debugging, they'll be visible when running tests.
-    eprintln!("Logs from your program will appear here!");
+            // for tool_call in tool_calls {
+            //     let name = tool_call["function"]["name"].as_str().unwrap_or_default();
+            //     if name.eq_ignore_ascii_case("read") {
+            //         let args = tool_call["function"]["arguments"].as_str().unwrap_or("{}");
+            //         let args_json: Value = serde_json::from_str(args).unwrap_or_else(|_| json!({}));
 
-    // TODO: Uncomment the lines below to pass the first stage
-    let message = &response["choices"][0]["message"];
+            //         if let Some(path) = args_json["file_path"].as_str() {
+            //             let file_content = fs::read_to_string(path)?;
 
-    if let Some(tool_calls) = message["tool_calls"].as_array() {
-        for tool_call in tool_calls {
-            let name = tool_call["function"]["name"].as_str().unwrap_or_default();
-            if name.eq_ignore_ascii_case("read") {
-                let args = tool_call["function"]["arguments"].as_str().unwrap_or("{}");
-                let args_json: Value = serde_json::from_str(args).unwrap_or_else(|_| json!({}));
-
-                if let Some(path) = args_json["file_path"].as_str() {
-                    let file_content = fs::read_to_string(path)?;
-                    println!("{}", file_content)
-                }
-            }
+            //             println!("{}", file_content)
+            //         }
+            //     }
+            // }
+        } else if let Some(content) = response["choices"][0]["message"]["content"].as_str() {
+            println!("{}", content);
+            break;
         }
-    } else if let Some(content) = response["choices"][0]["message"]["content"].as_str() {
-        println!("{}", content);
     }
 
     Ok(())
 }
+
+// "role": "assistant",
+// "content": null,
+// "tool_calls": [
+//   {
+//     "id": "call_abc123",
+//     "type": "function",
+//     "function": {
+//       "name": "Read",
+//       "arguments": "{\"file_path\": \"README.md\"}"
+//     }
+//   }
+// ]
+// }
