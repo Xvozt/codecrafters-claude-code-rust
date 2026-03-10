@@ -1,7 +1,12 @@
 use async_openai::{Client, config::OpenAIConfig};
 use clap::Parser;
 use serde_json::{Value, json};
-use std::{env, fs, process};
+use std::{
+    env,
+    fs::{self, File},
+    io::Write,
+    process,
+};
 
 #[derive(Parser)]
 #[command(author, version, about)]
@@ -32,6 +37,53 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "role": "user",
             "content": args.prompt
     }));
+
+    let mut tools: Vec<Value> = Vec::new();
+
+    let read_tool = json!({
+      "type": "function",
+      "function": {
+        "name": "Read",
+        "description": "Read and return the contents of a file",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "file_path": {
+              "type": "string",
+              "description": "The path to the file to read"
+            }
+          },
+          "required": ["file_path"]
+        }
+      }
+    });
+
+    let write_tool = json!(
+    {
+      "type": "function",
+      "function": {
+        "name": "Write",
+        "description": "Write content to a file",
+        "parameters": {
+          "type": "object",
+          "required": ["file_path", "content"],
+          "properties": {
+            "file_path": {
+              "type": "string",
+              "description": "The path of the file to write to"
+            },
+            "content": {
+              "type": "string",
+              "description": "The content to write to the file"
+            }
+          }
+        }
+      }
+    });
+
+    tools.push(read_tool);
+    tools.push(write_tool);
+
     loop {
         #[allow(unused_variables)]
         let response: Value = client
@@ -39,25 +91,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .create_byot(json!({
                 "messages": messages,
                 "model": "anthropic/claude-haiku-4.5",
-                "tools": [
-                    {
-                      "type": "function",
-                      "function": {
-                        "name": "Read",
-                        "description": "Read and return the contents of a file",
-                        "parameters": {
-                          "type": "object",
-                          "properties": {
-                            "file_path": {
-                              "type": "string",
-                              "description": "The path to the file to read"
-                            }
-                          },
-                          "required": ["file_path"]
-                        }
-                      }
-                    }
-                ]
+                "tools": tools
             }))
             .await?;
 
@@ -71,40 +105,60 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             && !tools.is_empty()
         {
             messages.push(message.to_owned());
-            let tool_call = match &tools[0]["function"] {
-                Value::Object(tool) => tool,
-                _ => panic!("Invalid tool call"),
-            };
-            let tool_call_id = match &tools[0]["id"] {
-                Value::String(id) => id,
-                _ => panic!("Tool call id not provided or not a string"),
-            };
 
-            let tool_name = match &tool_call["name"] {
-                Value::String(name) => name,
-                _ => panic!("Tool name must be a string"),
-            };
+            for tool in tools {
+                let tool_call = match &tool["function"] {
+                    Value::Object(tool) => tool,
+                    _ => panic!("Invalid tool call"),
+                };
+                let tool_call_id = match &tool["id"] {
+                    Value::String(id) => id,
+                    _ => panic!("Tool call id not provided or not a string"),
+                };
 
-            let args: Value = match &tool_call["arguments"] {
-                Value::String(raw) => serde_json::from_str(raw.as_str()).unwrap(),
-                _ => panic!("Invalid arguments"),
-            };
+                let tool_name = match &tool_call["name"] {
+                    Value::String(name) => name,
+                    _ => panic!("Tool name must be a string"),
+                };
 
-            match tool_name.as_str() {
-                "Read" => {
-                    if let Some(path) = args["file_path"].as_str() {
-                        let file_content = fs::read_to_string(path)?;
-                        messages.push(json!({
-                            "role": "tool",
-                            "tool_call_id": tool_call_id,
-                            "content": file_content,
-                        }));
-                    } else {
-                        panic!("file_path must be a string")
+                let args: Value = match &tool_call["arguments"] {
+                    Value::String(raw) => serde_json::from_str(raw.as_str()).unwrap(),
+                    _ => panic!("Invalid arguments"),
+                };
+
+                match tool_name.as_str() {
+                    "Read" => {
+                        if let Some(path) = args["file_path"].as_str() {
+                            let file_content = fs::read_to_string(path)?;
+                            messages.push(json!({
+                                "role": "tool",
+                                "tool_call_id": tool_call_id,
+                                "content": file_content,
+                            }));
+                        } else {
+                            panic!("file_path must be a string")
+                        }
                     }
-                }
-                _ => panic!("file path must be a string"),
-            };
+                    "Write" => {
+                        if let Some(path) = args["file_path"].as_str() {
+                            if let Some(content) = args["content"].as_str() {
+                                let mut file = File::create(path).unwrap();
+                                file.write_all(content.as_bytes()).unwrap();
+                                messages.push(json!({
+                                    "role": "tool",
+                                    "tool_call_id": tool_call_id,
+                                    "content": "",
+                                }));
+                            } else {
+                                panic!("no content")
+                            }
+                        } else {
+                            panic!("file_path must be a string")
+                        }
+                    }
+                    _ => panic!("file path must be a string"),
+                };
+            }
         } else if let Some(content) = response["choices"][0]["message"]["content"].as_str() {
             println!("{}", content);
             break;
