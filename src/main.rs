@@ -5,7 +5,7 @@ use std::{
     env,
     fs::{self, File},
     io::Write,
-    process,
+    process::{self, Command},
 };
 
 #[derive(Parser)]
@@ -81,8 +81,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
       }
     });
 
+    let bash_tool = json!({
+      "type": "function",
+      "function": {
+        "name": "Bash",
+        "description": "Execute a shell command",
+        "parameters": {
+          "type": "object",
+          "required": ["command"],
+          "properties": {
+            "command": {
+              "type": "string",
+              "description": "The command to execute"
+            }
+          }
+        }
+      }
+    });
+
     tools.push(read_tool);
     tools.push(write_tool);
+    tools.push(bash_tool);
 
     loop {
         #[allow(unused_variables)]
@@ -156,7 +175,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             panic!("file_path must be a string")
                         }
                     }
-                    _ => panic!("file path must be a string"),
+                    "Bash" => {
+                        if let Some(command) = args["command"].as_str() {
+                            let output = Command::new("sh").arg("-c").arg(command).output();
+
+                            let content = match output {
+                                Ok(output) => {
+                                    let stdout =
+                                        String::from_utf8_lossy(&output.stdout).into_owned();
+                                    let stderr =
+                                        String::from_utf8_lossy(&output.stderr).into_owned();
+                                    format!(
+                                        "exit_code: {:?}\nstdout:\n{}\nstderr:\n{}",
+                                        output.status.code(),
+                                        stdout,
+                                        stderr
+                                    )
+                                }
+                                Err(error) => format!("failed to run command: {error}"),
+                            };
+
+                            messages.push(json!({
+                                "role": "tool",
+                                "tool_call_id": tool_call_id,
+                                "content": content,
+                            }));
+                        } else {
+                            panic!("no command")
+                        }
+                    }
+                    _ => panic!("tool is not supported"),
                 };
             }
         } else if let Some(content) = response["choices"][0]["message"]["content"].as_str() {
