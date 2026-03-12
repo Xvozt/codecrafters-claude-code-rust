@@ -32,18 +32,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_api_key(api_key);
 
     let client = Client::with_config(config);
-<<<<<<< HEAD
     let mut messages: Vec<Value> = Vec::new();
     messages.push(json!({
             "role": "user",
             "content": args.prompt
     }));
-=======
-    let message_history = vec![json!({
-        "role": "user",
-        "content": args.prompt
-    })];
->>>>>>> 74fb507 (added examples)
 
     let mut tools: Vec<Value> = Vec::new();
 
